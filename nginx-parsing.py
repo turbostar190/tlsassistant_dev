@@ -1,10 +1,9 @@
-from re import I
 import crossplane
 from pprint import pprint
 import json
 
 
-payload = crossplane.parse('conf/nginx/nginx.conf', comments=False)
+payload = crossplane.parse('conf/nginx/nginx_do.conf', comments=False)
 # pprint(payload)
 print(json.dumps(payload, indent=2))
 
@@ -69,17 +68,29 @@ def structure(payload, struct):
     for directive in payload:
         directive_key = directive['directive']
         special = False
-        
+
         if directive_key not in struct:
             struct[directive_key] = []
-        # else:
-        #     if type(struct[directive_key][0]) == str: # prima volta che scopro che ci sono più chiavi uguali
-        #         struct[directive_key] = [struct[directive_key].copy()]
-        #     else:
-        #         struct[directive_key].append({})
-        #         i = len(struct[directive_key])-1
-        #         struct[directive_key][i] = directive['args']
-        #     special = True
+        elif 'block' not in directive: 
+            # se esiste già questa chiave ma non è un inizio di sottoblocco,
+            # allora è una lista di lista, ad indicare più direttive con uguale chiave
+            # ma distinto valore.
+            # Esempio: 
+            # {
+            #   listen 80;
+            #   listen 443 ssl;
+            # }
+            # diventa
+            #   {'listen': [['80'], ['443', 'ssl']]}
+            if any(isinstance(el, str) for el in struct[directive_key]):
+                # prima volta che scopro che ci sono più chiavi uguali,
+                # quindi modifico il valore della chiave in array, e aggiungo 
+                # ciò che ho attualmente nel loop...
+                struct[directive_key] = [struct[directive_key], directive['args']]
+                special = True
+            elif any(isinstance(el, list) for el in struct[directive_key]):
+                struct[directive_key].append(directive['args'])
+                special = True
 
         if 'block' in directive:
             struct[directive_key].append({})
@@ -91,13 +102,11 @@ def structure(payload, struct):
                 structure(directive['block'], struct[directive_key][index][arg])
             else:
                 structure(directive['block'], struct[directive_key][index])
-        # elif not special: 
-        else:
+        elif not special: # se non è un inizio di sottoblocco e non è già stato elaborato in precedenza
             struct[directive_key] = directive['args']
 
 struct = {}
 for file in payload['config']:
-    # if file['file'] == 'conf/nginx/fastcgi_params':
     struct[file['file']] = {};
     structure(file['parsed'], struct[file['file']])
 # pprint(struct)
@@ -106,7 +115,16 @@ for file in payload['config']:
 # pprint(payload)
 
 
-def rebuild_wrapper(struct: dict, my_payload: list):
+def rebuild_wrapper(struct, my_payload):
+    """
+    Funzione wrapper per ritornare alla struttura della libreria 'crossplane' 
+    dalla struttura personalizzata.
+
+    :param struct: struttura dati custom creata dalla funzione `structure`
+    :type struct: dict
+    :param my_payload: output con modifica della reference a questa list
+    :type my_payload: list
+    """
     for key, val in struct.items():
         for entry in val:
             my_payload.append({})
@@ -123,52 +141,76 @@ def rebuild_wrapper(struct: dict, my_payload: list):
                 break
 
 
-def rebuild(struct: dict, my_payload: list):
+def rebuild(struct, my_payload):
+    """
+    Funzione ricorsiva per generare struttura dati utilizzata dalla libreria `crossplane`
+    dalla nostra struttura custom
+    
+    :param struct: struttura dati custom creata dalla funzione `structure`
+    :type struct: dict
+    :param my_payload: output con modifica della reference a questa list
+    :type my_payload: list
+    """
     for key, val in struct.items():
-        if type(val) == list: 
+        if type(val) == list:
             my_payload.append({})
             index = len(my_payload) - 1
 
             if len(val) > 0 and type(val[0]) == str: # str degli args
                 my_payload[index]['directive'] = key
                 my_payload[index]['args'] = val
+            else: # primo inizio di sottoblocco
+                max = len(val) - 1
+                for cont, v in enumerate(val):
+                    if type(v) == list:
+                        # Caso nel cui fosse una lista di liste come direttive multiple con stessa chiave e valori diversi
+                        if len(v) > 0:
+                            my_payload[index]['directive'] = key
+                            my_payload[index]['args'] = v
+                    else:
+                        my_payload[index]['block'] = []
+                        my_payload[index]['directive'] = key
+                        my_payload[index]['args'] = list(v.keys()) if any(isinstance(el, dict) for el in v.values()) else []
+                        rebuild(v, my_payload[index]['block'])
 
-            else: # primo step sottoblocco
-                max = len(val)-1
-                for i, v in enumerate(val):
-                    my_payload[index]['block'] = []
-                    my_payload[index]['directive'] = key
-                    my_payload[index]['args'] = list(v.keys()) if type(list(v.values())[0]) == dict else []
-                    rebuild(v, my_payload[index]['block'])
-                    if i < max:
+                    if cont < max: # Se questo è l'ultimo elemento del sottoblocco, non aggiungo nuovo dict vuoto
                         my_payload.append({})
                         index = len(my_payload) - 1
 
         else: # caso speciale args con sottoblocco: type(val) == dict
             # ogni entry corrisponde ad un nuovo blocco distinto (vedi location)
             for i, (k, v) in enumerate(val.items()):
-                my_payload.append({})
-                my_payload[i]['directive'] = k
-                my_payload[i]['args'] = v
+                if any(isinstance(el, list) for el in v):
+                    for entry in v:
+                        my_payload.append({})
+                        i = len(my_payload)-1
+
+                        my_payload[i]['directive'] = k
+                        my_payload[i]['args'] = entry
+                else:
+                    my_payload.append({})
+                    i = len(my_payload)-1
+
+                    my_payload[i]['directive'] = k
+                    my_payload[i]['args'] = v
 
 
-pprint(struct)
 for key, val in struct.items():
+    print("---VAL")
+    pprint(val)
     my_payload = []
     # rebuild_wrapper(struct['conf/nginx/./conf.d/default.conf'], my_payload)
     # rebuild_wrapper(struct['conf/nginx/nginx.conf'], my_payload)
     # rebuild_wrapper(struct['conf/nginx/fastcgi_params'], my_payload)
     rebuild_wrapper(val, my_payload)
 
-    print("---")
+    print("---MY")
     pprint(my_payload)
 
-    print("---")
+    print("---CONFIG")
     # pprint(payload)
     config = crossplane.build(my_payload)
     print(config)
-    
-
 
 
 
