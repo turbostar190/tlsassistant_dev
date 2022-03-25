@@ -1,9 +1,10 @@
 import crossplane
 from pprint import pprint
 import json
+import ast
 
 
-payload = crossplane.parse('conf/nginx/nginx_do.conf', comments=False)
+payload = crossplane.parse('conf/nginx/nginx_.conf', comments=False)
 # pprint(payload)
 print(json.dumps(payload, indent=2))
 
@@ -13,7 +14,7 @@ print(json.dumps(payload, indent=2))
 
 # print("---")
 # config = crossplane.build(
-#     payload['config'][1]['parsed']
+    # payload['config'][0]['parsed']
 # )
 # print(config)
 # print("---")
@@ -97,7 +98,7 @@ def structure(payload, struct):
             index = len(struct[directive_key]) - 1
 
             if len(directive['args']) != 0:
-                arg = ' '.join(directive['args']) # Stringa unica per l'argomento di un blocco
+                arg = repr(directive['args']) # repr della lista per argomento di un blocco
                 struct[directive_key][index][arg] = {} # Sottoblocco con chiave gli argomenti di un blocco, esempio location >>> = /50x.html <<< {...}
                 structure(directive['block'], struct[directive_key][index][arg])
             else:
@@ -170,7 +171,8 @@ def rebuild(struct, my_payload):
                     else:
                         my_payload[index]['block'] = []
                         my_payload[index]['directive'] = key
-                        my_payload[index]['args'] = list(v.keys()) if any(isinstance(el, dict) for el in v.values()) else []
+                        # TODO: Valutare utilizzo di eval
+                        my_payload[index]['args'] = ast.literal_eval(*v) if any(isinstance(el, dict) for el in v.values()) else []
                         rebuild(v, my_payload[index]['block'])
 
                     if cont < max: # Se questo è l'ultimo elemento del sottoblocco, non aggiungo nuovo dict vuoto
@@ -196,8 +198,8 @@ def rebuild(struct, my_payload):
 
 
 for key, val in struct.items():
-    print("---VAL")
-    pprint(val)
+    # print("---VAL")
+    # pprint(val)
     my_payload = []
     # rebuild_wrapper(struct['conf/nginx/./conf.d/default.conf'], my_payload)
     # rebuild_wrapper(struct['conf/nginx/nginx.conf'], my_payload)
@@ -205,10 +207,10 @@ for key, val in struct.items():
     rebuild_wrapper(val, my_payload)
 
     print("---MY")
-    pprint(my_payload)
+    # pprint(my_payload)
 
     print("---CONFIG")
-    # pprint(payload)
+    # # pprint(payload)
     config = crossplane.build(my_payload)
     print(config)
 
