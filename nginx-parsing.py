@@ -181,7 +181,7 @@ def rebuild(struct, my_payload):
 
         else: # caso speciale args con sottoblocco: type(val) == dict
             # ogni entry corrisponde ad un nuovo blocco distinto (vedi location)
-            for i, (k, v) in enumerate(val.items()):
+            for k, v in val.items():
                 if any(isinstance(el, list) for el in v):
                     for entry in v:
                         my_payload.append({})
