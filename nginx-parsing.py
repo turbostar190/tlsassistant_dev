@@ -111,6 +111,7 @@ for file in payload['config']:
     struct[file['file']] = {};
     structure(file['parsed'], struct[file['file']])
 # pprint(struct)
+print(json.dumps(struct, indent=2))
 
 # struct["conf/nginx/nginx.conf"]['http'][0]['ssl_protocols'].remove('SSLv3')
 # pprint(payload)
@@ -189,6 +190,15 @@ def rebuild(struct, my_payload):
 
                         my_payload[i]['directive'] = k
                         my_payload[i]['args'] = entry
+                elif any(isinstance(el, dict) for el in v):
+                    # this could be an 'if' directive, so let's start again with subblock
+                    my_payload.append({})
+                    i = len(my_payload)-1
+
+                    my_payload[i]['directive'] = k
+                    my_payload[i]['args'] = ast.literal_eval(*v[0].keys())
+                    my_payload[i]['block'] = []
+                    rebuild(v[0], my_payload[i]['block'])
                 else:
                     my_payload.append({})
                     i = len(my_payload)-1
@@ -207,7 +217,7 @@ for key, val in struct.items():
     rebuild_wrapper(val, my_payload)
 
     print("---MY")
-    # pprint(my_payload)
+    pprint(my_payload)
 
     print("---CONFIG")
     # # pprint(payload)
